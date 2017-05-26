@@ -1,0 +1,139 @@
+---
+title: "Dumbbell curls"
+author: "Maarten SG"
+date: "25/05/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache=TRUE)
+```
+
+
+### Introduction
+
+This assignment of the Practical Machine Learning course involves analysis of Human Activity Recognition data on the quality of performing cumbbell curls.
+Six young participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: 
+class A: exactly according to the specification, 
+class B: throwing the elbows to the front,
+class C: lifting the dumbbell only halfway, 
+class D: lowering the dumbbell only halfway,
+class E: throwing the hips to the front.
+4 sensors were used to measure each activity (belt, dumbbell, arm and forearm)
+
+### Project
+The goal of the project is to predict the manner in which the exercise was done
+Data was collected and divided into a training and a testing dataset.
+Describe and motivate
+  - how the model was built
+  - how cross validation was used
+  - what the expected out of sample error is
+Also predict the outcome of the 20 test cases in the testing set
+
+Load necessary libraries:
+```{r loadlibrary, message=FALSE}
+library(ggplot2)
+library(dplyr)
+library(caret)
+library(corrplot)
+library(tidyr)
+```
+
+Load training and testing datasets in R:
+``` {r loaddata}
+#set working directory to appropriate directory with downloaded files using setwd()
+setwd("~/coursera/8 Practical machine learning/assignment")
+trainingall <- read.csv("pml-training.csv")
+testingall <- read.csv("pml-testing.csv")
+```
+
+Explore datasets and preprocess/prepare for analysis:
+``` {r explore}
+dim(trainingall)
+dim(testingall)
+
+#identify and remove columns with all NA in testing from both datasets
+naCols <- colSums(is.na(testingall)) == 20
+#also remove columns not essential for model building (X, user_name, ..timestamp.. and ..window)
+noCols <- c(1,2,3,4,5,6,7)
+testing <- testingall[,!naCols][,-noCols]
+training <- trainingall[,!naCols][,-noCols]
+
+```
+The training and testing datasets contains `r dim(trainingall)[1]` and `r dim(testingall)[1]` samples respectively which are described by `r dim(trainingall)[2] -1` predictors and the outcome (class/problem_id).
+`r sum(naCols)` predictors in the testing set contain no data (NA) and will be excluded from model building and prediction efforts.
+Also remove unnecessary columns from dataset.
+
+Remove highly correlated columns from the dataset as well:
+``` {r corr}
+corrplot(cor(training[,-53]),order="hclust")
+prep <- preProcess(training, method="corr")
+training <- predict(prep, training)
+testing <- predict(prep, testing)
+
+#highly correlated columns removed:
+prep$method$remove
+```
+
+Check for obvious outlier samples:
+``` {r outlier}
+traininglong <- gather(training, variable, value, -classe)
+ggplot(traininglong, aes(x = variable, y = value)) + geom_boxplot() +
+  theme(axis.text.x=element_text(angle=90,hjust=0, vjust=0.5))
+```
+
+Remove onle the one sample where the magnet_dumbbell_y value is clearly an outlier and probably a faulty readout.
+``` {r outlier sample}
+training <- training[!training$magnet_dumbbell_y < -3000,]
+```
+
+Split training data to sub - training and testing sets for cross validation and assessment of out of sample error.
+``` {r split}
+inTrain <- createDataPartition(y=training$classe, p=0.7, list=F)
+subtraining <- training[inTrain,]
+subtesting <- training[-inTrain,]
+```
+
+#### Fit a model
+Now determine a model fit to the data using rf and gbm with or without PCA preprocessing and see what's best. I performed a comparison of the Boosting and Random Forest classification methods (gbm and rf resp.) with or withoot PCA processing (data not shown). Random Forest without PCA preprocessing was selected based on best out of sample error.
+
+``` {r modelfit, message=FALSE}
+set.seed(531)
+modelFit <- train(classe ~ ., method = "rf", data= subtraining, trControl = trainControl(method="cv", number=4))
+
+modelFit
+pred <- predict(modelFit, newdata = subtesting)
+cM <- confusionMatrix(subtesting$classe, pred)
+cM
+```
+
+This Random Forest model, using resampling method "cv" , 4 resampling iterations and using 23 variables for each split (mtry), achieves an accuracy on the subtesting / validation set of `r cM$overall[1] `. This translates to an expected out of sample error of 1-`r cM$overall[1] ` = `r 100*(1-cM$overall[1]) ` %.
+
+### Model tuning
+
+Additional model tuning was done within the caret train function. The parameter mtry, the number of variables randomly sampled as candidates at each split, was optimized first.
+``` {r modelfit_tuning}
+modelFit2 <- train(classe ~ ., method = "rf", data= subtraining, 
+                    trControl = trainControl(method="cv", number=4),
+                    tuneGrid=expand.grid(.mtry=c(7:16)), ntree=500)
+```
+
+``` {r modelfit_tuning_result}
+plot(modelFit2)
+pred <- predict(modelFit2, newdata = subtesting)
+cM2 <- confusionMatrix(subtesting$classe, pred)
+cM2
+```
+
+Tuning of mtry shows optimum performance at mtry=`r modelFit2$finalModel$mtry` and also increased the prediction accuracy on the subtesting validation set to `r cM2$overall[1] `.
+
+Allthough a very marginal gain of performance it was a good exercise in understanding the tuning within train(). As the out of sample error is very low already further tuning is not necessary.
+
+### Prediction
+Finally predict the outcome for the 20 test cases using the optimised Random Forest model.
+
+``` {r prediction}
+predict(modelFit2, newdata = testing)
+```
+
+
