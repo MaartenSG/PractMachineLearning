@@ -2,7 +2,11 @@
 title: "Dumbbell curls"
 author: "Maarten SG"
 date: "25/05/2017"
-output: html_document
+output:
+  pdf_document: default
+  html_document: default
+  md_document:
+    variant: markdown_github
 ---
 
 ```{r setup, include=FALSE}
